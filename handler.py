@@ -116,7 +116,9 @@ def _handle_video(job_id: str, job_input: dict[str, Any]) -> dict[str, Any]:
     if not prompt.strip():
         prompt = "natural character motion, subtle breathing, smooth cinematic camera drift"
     seed = int(job_input.get("seed") or 0)
-    duration_s = max(1, min(int(job_input.get("duration_s") or 3), 8))
+    # Wan2.2 TI2V-5B의 검증 범위는 121프레임(24fps 기준 5초)까지 — 그 이상은
+    # 장시간 GPU 점유 후 OOM/실패로 끝나므로 워커에서도 상한을 강제한다.
+    duration_s = max(1, min(int(job_input.get("duration_s") or 3), 5))
     requested_fps = max(1, min(int(job_input.get("fps") or 16), WAN22_NATIVE_FPS))
 
     image_bytes = _decode_image_payload(image_payload)
