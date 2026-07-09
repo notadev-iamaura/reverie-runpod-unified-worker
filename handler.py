@@ -340,7 +340,7 @@ def run_wan22_cli(
         size = WAN22_PORTRAIT_SIZE if image_height >= image_width else WAN22_LANDSCAPE_SIZE
 
         command = [
-            "python",
+            sys.executable,
             str(generate_py),
             "--task",
             "ti2v-5B",
@@ -365,10 +365,10 @@ def run_wan22_cli(
             "--save_file",
             str(raw_video_path),
         ]
-        subprocess.run(command, cwd=str(WAN22_REPO_DIR), check=True, timeout=COMFY_TIMEOUT_S)
+        run_command(command, cwd=str(WAN22_REPO_DIR), timeout=COMFY_TIMEOUT_S)
         output_path = raw_video_path
         if requested_fps != WAN22_NATIVE_FPS:
-            subprocess.run(
+            run_command(
                 [
                     "ffmpeg",
                     "-y",
@@ -381,7 +381,6 @@ def run_wan22_cli(
                     "+faststart",
                     str(final_video_path),
                 ],
-                check=True,
                 timeout=180,
             )
             output_path = final_video_path
@@ -444,6 +443,34 @@ def path_report(path: Path) -> dict[str, Any]:
             }
         )
     return report
+
+
+def run_command(
+    command: list[str], *, cwd: str | None = None, timeout: int | float | None = None
+) -> None:
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        timeout=timeout,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode == 0:
+        return
+    command_display = " ".join(command)
+    raise RuntimeError(
+        f"Command failed ({completed.returncode}): {command_display}; "
+        f"stdout_tail={tail(completed.stdout)}; stderr_tail={tail(completed.stderr)}"
+    )
+
+
+def tail(value: str | None, limit: int = 2000) -> str:
+    if not value:
+        return ""
+    value = value.strip()
+    return value[-limit:]
 
 
 def frames_for_duration(duration_s: int, native_fps: int) -> int:
