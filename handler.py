@@ -20,10 +20,12 @@ import base64
 import json
 import math
 import os
+import shutil
 import subprocess
 import tempfile
 import time
 import urllib.parse
+import sys
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             return _handle_video(job.get("id", "job"), job_input)
         if task in {"prepare_video_model", "prepare-video-model"}:
             return _handle_prepare_video_model()
+        if task == "diagnostics":
+            return _handle_diagnostics()
         return {"error": f"Unsupported task: {task}"}
     except Exception as exc:  # noqa: BLE001 - RunPod needs structured errors
         return {"error": str(exc)}
@@ -125,6 +129,17 @@ def _handle_prepare_video_model() -> dict[str, Any]:
         }
     download_wan22_model()
     return {"ok": True, "status": "downloaded", "model_dir": str(WAN22_MODEL_DIR)}
+
+
+def _handle_diagnostics() -> dict[str, Any]:
+    paths = [Path("/runpod-volume"), Path("/workspace"), WAN22_MODEL_DIR, WAN22_REPO_DIR]
+    return {
+        "ok": True,
+        "video_engine": VIDEO_ENGINE,
+        "python": sys.executable,
+        "huggingface_cli": shutil.which("huggingface-cli"),
+        "paths": {str(path): path_report(path) for path in paths},
+    }
 
 
 def _validate_images(images: Any) -> None:
@@ -374,21 +389,41 @@ def run_wan22_cli(
 
 def download_wan22_model() -> None:
     WAN22_MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            "huggingface-cli",
-            "download",
-            "Wan-AI/Wan2.2-TI2V-5B",
-            "--local-dir",
-            str(WAN22_MODEL_DIR),
-        ],
-        check=True,
-        timeout=COMFY_TIMEOUT_S,
-    )
+    cache_dir = Path(os.environ.get("HF_HUB_CACHE", "/runpod-volume/.cache/huggingface/hub"))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(
+            repo_id="Wan-AI/Wan2.2-TI2V-5B",
+            local_dir=str(WAN22_MODEL_DIR),
+            cache_dir=str(cache_dir),
+        )
+    except Exception as exc:  # noqa: BLE001 - surface detailed RunPod job errors
+        volume_report = path_report(Path("/runpod-volume"))
+        raise RuntimeError(
+            "Failed to download Wan-AI/Wan2.2-TI2V-5B "
+            f"to {WAN22_MODEL_DIR}: {exc}; /runpod-volume={volume_report}"
+        ) from exc
 
 
 def wan22_model_present() -> bool:
     return WAN22_MODEL_DIR.exists() and any(WAN22_MODEL_DIR.iterdir())
+
+
+def path_report(path: Path) -> dict[str, Any]:
+    report: dict[str, Any] = {"exists": path.exists()}
+    if path.exists():
+        usage = shutil.disk_usage(path)
+        report.update(
+            {
+                "is_dir": path.is_dir(),
+                "total_gb": round(usage.total / (1024**3), 2),
+                "used_gb": round(usage.used / (1024**3), 2),
+                "free_gb": round(usage.free / (1024**3), 2),
+            }
+        )
+    return report
 
 
 def frames_for_duration(duration_s: int, native_fps: int) -> int:
