@@ -9,7 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WAN22_NATIVE_FPS=24 \
     WAN22_SAMPLE_STEPS=24 \
     WAN22_AUTO_DOWNLOAD=false \
-    COMFY_TIMEOUT_S=3600
+    COMFY_TIMEOUT_S=3600 \
+    HF_HOME=/runpod-volume/.cache/huggingface \
+    HF_HUB_CACHE=/runpod-volume/.cache/huggingface/hub
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
