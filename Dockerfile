@@ -32,11 +32,6 @@ RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
       librosa \
       ninja packaging
 
-RUN cd /opt/Wan2.2 \
-    && /opt/venv/bin/python - <<'PY'
-import wan
-PY
-
 COPY handler.py /handler.py
 COPY scripts/download_wan22_ti2v_5b.sh /usr/local/bin/download_wan22_ti2v_5b.sh
 RUN chmod +x /usr/local/bin/download_wan22_ti2v_5b.sh
