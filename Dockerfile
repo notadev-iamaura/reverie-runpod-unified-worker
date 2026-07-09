@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     WAN22_NATIVE_FPS=24 \
     WAN22_SAMPLE_STEPS=24 \
     WAN22_AUTO_DOWNLOAD=false \
-    COMFY_TIMEOUT_S=1800
+    COMFY_TIMEOUT_S=3600
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
@@ -26,8 +26,7 @@ RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
     && grep -v '^flash_attn' requirements.txt > /tmp/wan22-requirements-no-flash-attn.txt \
     && /opt/venv/bin/python -m pip install --no-cache-dir \
       -r /tmp/wan22-requirements-no-flash-attn.txt \
-      ninja packaging \
-    && /opt/venv/bin/python -m pip install --no-cache-dir --no-build-isolation flash_attn
+      ninja packaging
 
 COPY handler.py /handler.py
 COPY scripts/download_wan22_ti2v_5b.sh /usr/local/bin/download_wan22_ti2v_5b.sh
