@@ -21,7 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN /opt/venv/bin/python -m pip install --no-cache-dir "huggingface_hub[cli]"
 
-ARG WAN22_REF=main
+# Wan2.2 repo를 고정 커밋으로 clone한다. unpinned main은 upstream 모듈 추가
+# (예: wan/animate.py의 peft 의존)로 rebuild 시 조용히 깨질 수 있어 SHA로 고정.
+ARG WAN22_REF=42bf4cfaa384bc21833865abc2f9e6c0e67233dc
 RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
     && cd /opt/Wan2.2 \
     && git checkout "${WAN22_REF}" \
@@ -30,7 +32,16 @@ RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
       -r /tmp/wan22-requirements-no-flash-attn.txt \
       decord \
       librosa \
+      peft \
+      einops \
       ninja packaging
+
+# CPU-safe import smoke: `import wan`이 module-level에서 요구하는 서드파티
+# 의존성이 전부 설치됐는지 빌드 단계에서 검증한다 (GPU 불필요).
+# 목록은 위 WAN22_REF 커밋의 wan/ 패키지 import 클로저에서 도출했으며,
+# WAN22_REF를 올릴 때 함께 재도출해야 한다. (직전 장애: wan/animate.py의
+# peft import 누락이 런타임에서야 발견됨 — decord·librosa도 같은 사례)
+RUN /opt/venv/bin/python -c "import PIL, cv2, decord, diffusers, easydict, einops, ftfy, imageio, librosa, numpy, peft, regex, safetensors, scipy, torch, torchaudio, torchvision, tqdm, transformers; print('wan deps import smoke OK')"
 
 COPY handler.py /handler.py
 COPY scripts/download_wan22_ti2v_5b.sh /usr/local/bin/download_wan22_ti2v_5b.sh
