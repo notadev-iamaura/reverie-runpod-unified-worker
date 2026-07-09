@@ -34,7 +34,14 @@ RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
       librosa \
       peft \
       einops \
-      ninja packaging
+      ninja packaging \
+    # flash-attn은 설치하지 않으므로(빌드 시간·GPU 아키텍처 호환 문제)
+    # model.py가 직접 호출하는 flash_attention을 SDPA fallback이 있는
+    # attention() wrapper로 우회시킨다. 미패치 시 attention.py:112의
+    # `assert FLASH_ATTN_2_AVAILABLE`로 모든 영상 생성이 실패한다.
+    && sed -i 's/^from \.attention import flash_attention$/from .attention import attention as flash_attention/' \
+      /opt/Wan2.2/wan/modules/model.py \
+    && grep -q "import attention as flash_attention" /opt/Wan2.2/wan/modules/model.py
 
 # CPU-safe import smoke: `import wan`이 module-level에서 요구하는 서드파티
 # 의존성이 전부 설치됐는지 빌드 단계에서 검증한다 (GPU 불필요).
