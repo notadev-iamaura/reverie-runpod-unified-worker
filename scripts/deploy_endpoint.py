@@ -13,6 +13,9 @@ Optional env:
 - RUNPOD_IDLE_TIMEOUT: default 900.
 - RUNPOD_WORKERS_MIN: default 0.
 - RUNPOD_WORKERS_MAX: default 1.
+- RUNPOD_TEMPLATE_ID: reuse an existing template instead of creating one.
+- RUNPOD_UPDATE_BOUND_TEMPLATE: default true; update endpoint.template in place
+  when RunPod reports a bound template.
 
 The script is dry-run by default. Pass --apply to mutate RunPod.
 """
@@ -46,6 +49,10 @@ def main() -> int:
     idle_timeout = int(os.environ.get("RUNPOD_IDLE_TIMEOUT", "900"))
     workers_min = int(os.environ.get("RUNPOD_WORKERS_MIN", "0"))
     workers_max = int(os.environ.get("RUNPOD_WORKERS_MAX", "1"))
+    template_id_override = os.environ.get("RUNPOD_TEMPLATE_ID")
+    update_bound_template = (
+        os.environ.get("RUNPOD_UPDATE_BOUND_TEMPLATE", "true").lower() == "true"
+    )
 
     endpoint = get_endpoint(api_key, endpoint_id)
     if not endpoint:
@@ -57,6 +64,8 @@ def main() -> int:
         "endpoint_name": endpoint.get("name"),
         "current_template_id": endpoint.get("templateId"),
         "new_template_name": template_name,
+        "template_id_override": template_id_override,
+        "update_bound_template": update_bound_template,
         "new_image": image_name,
         "gpuIds": endpoint.get("gpuIds"),
         "networkVolumeId": endpoint.get("networkVolumeId"),
@@ -70,14 +79,34 @@ def main() -> int:
     if not args.apply:
         return 0
 
-    template = save_template(
-        api_key=api_key,
-        name=template_name,
-        image_name=image_name,
-        container_disk_gb=container_disk_gb,
-    )
+    endpoint_template = endpoint.get("template") or {}
+    if update_bound_template and endpoint_template.get("id"):
+        template = save_template(
+            api_key=api_key,
+            name=endpoint_template.get("name") or template_name,
+            image_name=image_name,
+            # 기존 template의 disk/env/dockerArgs를 보존한다 (image만 교체).
+            container_disk_gb=endpoint_template.get("containerDiskInGb") or container_disk_gb,
+            template_id=endpoint_template["id"],
+            volume_mount_path=endpoint_template.get("volumeMountPath") or "/workspace",
+            env=endpoint_template.get("env") or [],
+            docker_args=endpoint_template.get("dockerArgs") or "",
+        )
+    elif template_id_override:
+        template = {
+            "id": template_id_override,
+            "name": template_name,
+            "imageName": image_name,
+        }
+    else:
+        template = save_template(
+            api_key=api_key,
+            name=template_name,
+            image_name=image_name,
+            container_disk_gb=container_disk_gb,
+        )
     template_id = template["id"]
-    updated = save_endpoint(
+    settings_update = save_endpoint(
         api_key=api_key,
         endpoint=endpoint,
         template_id=template_id,
@@ -85,6 +114,14 @@ def main() -> int:
         workers_max=workers_max,
         idle_timeout=idle_timeout,
     )
+    if update_bound_template and endpoint_template.get("id"):
+        template_update = {"id": endpoint_id, "templateId": template_id}
+    else:
+        template_update = update_endpoint_template(
+            api_key=api_key,
+            endpoint_id=endpoint_id,
+            template_id=template_id,
+        )
     print(
         json.dumps(
             {
@@ -95,11 +132,11 @@ def main() -> int:
                     "imageName": template.get("imageName"),
                 },
                 "endpoint": {
-                    "id": updated.get("id"),
-                    "name": updated.get("name"),
-                    "templateId": updated.get("templateId"),
-                    "workersMin": updated.get("workersMin"),
-                    "workersMax": updated.get("workersMax"),
+                    "id": template_update.get("id"),
+                    "name": settings_update.get("name"),
+                    "templateId": template_update.get("templateId"),
+                    "workersMin": settings_update.get("workersMin"),
+                    "workersMax": settings_update.get("workersMax"),
                 },
             },
             ensure_ascii=False,
@@ -156,6 +193,18 @@ def get_endpoint(api_key: str, endpoint_id: str) -> dict[str, Any] | None:
               templateId
               workersMax
               workersMin
+              template {
+                id
+                name
+                imageName
+                volumeMountPath
+                containerDiskInGb
+                dockerArgs
+                env {
+                  key
+                  value
+                }
+              }
             }
           }
         }
@@ -166,24 +215,52 @@ def get_endpoint(api_key: str, endpoint_id: str) -> dict[str, Any] | None:
 
 
 def save_template(
-    *, api_key: str, name: str, image_name: str, container_disk_gb: int
+    *,
+    api_key: str,
+    name: str,
+    image_name: str,
+    container_disk_gb: int,
+    template_id: str | None = None,
+    volume_mount_path: str = "/workspace",
+    env: list[dict[str, str]] | None = None,
+    docker_args: str = "",
 ) -> dict[str, Any]:
+    """Serverless template을 생성/갱신한다.
+
+    주의: saveTemplate은 전체 필드를 덮어쓰므로, 기존 template을 in-place로
+    갱신할 때는 호출자가 현재 env/dockerArgs를 반드시 넘겨야 한다.
+    (예: PYTORCH_CUDA_ALLOC_CONF 같은 운영 env가 배포마다 초기화되는 사고 방지)
+    """
+    id_field = f"id: {gql_string(template_id)}" if template_id else ""
+    env_items = ", ".join(
+        f"{{key: {gql_string(item['key'])}, value: {gql_string(item['value'])}}}"
+        for item in (env or [])
+    )
     data = graphql(
         api_key,
         f"""
         mutation {{
           saveTemplate(input: {{
+            {id_field}
             name: {gql_string(name)}
             imageName: {gql_string(image_name)}
             isServerless: true
+            dockerArgs: {gql_string(docker_args)}
+            env: [{env_items}]
             containerDiskInGb: {container_disk_gb}
             volumeInGb: 0
+            volumeMountPath: {gql_string(volume_mount_path)}
           }}) {{
             id
             name
             imageName
             isServerless
             containerDiskInGb
+            volumeMountPath
+            env {{
+              key
+              value
+            }}
           }}
         }}
         """,
@@ -227,6 +304,26 @@ def save_endpoint(
         """,
     )
     return data["saveEndpoint"]
+
+
+def update_endpoint_template(
+    *, api_key: str, endpoint_id: str, template_id: str
+) -> dict[str, Any]:
+    data = graphql(
+        api_key,
+        f"""
+        mutation {{
+          updateEndpointTemplate(input: {{
+            endpointId: {gql_string(endpoint_id)}
+            templateId: {gql_string(template_id)}
+          }}) {{
+            id
+            templateId
+          }}
+        }}
+        """,
+    )
+    return data["updateEndpointTemplate"]
 
 
 def gql_string(value: str) -> str:
