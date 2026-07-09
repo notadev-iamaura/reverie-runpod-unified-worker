@@ -6,6 +6,8 @@ Compatibility goals:
   {"input": {"workflow": <ComfyUI API workflow>, "images": [...]?}}
 - AI image-to-video uses:
   {"input": {"task": "video", "image": {"type": "base64", "data": ...}, ...}}
+- Model preload uses:
+  {"input": {"task": "prepare_video_model"}}
 
 Video generation defaults to Wan2.2 TI2V-5B via the official Wan CLI. The image
 path still uses ComfyUI so the current production image workflow can continue
@@ -53,6 +55,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
             return _handle_image(job.get("id", "job"), job_input)
         if task == "video":
             return _handle_video(job.get("id", "job"), job_input)
+        if task in {"prepare_video_model", "prepare-video-model"}:
+            return _handle_prepare_video_model()
         return {"error": f"Unsupported task: {task}"}
     except Exception as exc:  # noqa: BLE001 - RunPod needs structured errors
         return {"error": str(exc)}
@@ -110,6 +114,17 @@ def _handle_video(job_id: str, job_input: dict[str, Any]) -> dict[str, Any]:
         duration_s=duration_s,
         requested_fps=requested_fps,
     )
+
+
+def _handle_prepare_video_model() -> dict[str, Any]:
+    if wan22_model_present():
+        return {
+            "ok": True,
+            "status": "already_present",
+            "model_dir": str(WAN22_MODEL_DIR),
+        }
+    download_wan22_model()
+    return {"ok": True, "status": "downloaded", "model_dir": str(WAN22_MODEL_DIR)}
 
 
 def _validate_images(images: Any) -> None:
@@ -276,7 +291,7 @@ def run_wan22_cli(
     generate_py = WAN22_REPO_DIR / "generate.py"
     if not generate_py.exists():
         raise RuntimeError(f"Wan2.2 repo not found at {WAN22_REPO_DIR}")
-    if not WAN22_MODEL_DIR.exists():
+    if not wan22_model_present():
         if WAN22_AUTO_DOWNLOAD:
             download_wan22_model()
         else:
@@ -370,6 +385,10 @@ def download_wan22_model() -> None:
         check=True,
         timeout=COMFY_TIMEOUT_S,
     )
+
+
+def wan22_model_present() -> bool:
+    return WAN22_MODEL_DIR.exists() and any(WAN22_MODEL_DIR.iterdir())
 
 
 def frames_for_duration(duration_s: int, native_fps: int) -> int:
