@@ -46,6 +46,16 @@ WAN22_SAMPLE_STEPS = int(os.environ.get("WAN22_SAMPLE_STEPS", "24"))
 WAN22_AUTO_DOWNLOAD = os.environ.get("WAN22_AUTO_DOWNLOAD", "false").lower() == "true"
 WAN22_LANDSCAPE_SIZE = os.environ.get("WAN22_LANDSCAPE_SIZE", "1280*704")
 WAN22_PORTRAIT_SIZE = os.environ.get("WAN22_PORTRAIT_SIZE", "704*1280")
+WAN22_REQUIRED_FILES = (
+    "Wan2.2_VAE.pth",
+    "config.json",
+    "configuration.json",
+    "diffusion_pytorch_model-00001-of-00003.safetensors",
+    "diffusion_pytorch_model-00002-of-00003.safetensors",
+    "diffusion_pytorch_model-00003-of-00003.safetensors",
+    "diffusion_pytorch_model.safetensors.index.json",
+    "models_t5_umt5-xxl-enc-bf16.pth",
+)
 
 
 def handler(job: dict[str, Any]) -> dict[str, Any]:
@@ -136,6 +146,8 @@ def _handle_diagnostics() -> dict[str, Any]:
     return {
         "ok": True,
         "video_engine": VIDEO_ENGINE,
+        "wan22_model_present": wan22_model_present(),
+        "wan22_missing_files": missing_wan22_files(),
         "python": sys.executable,
         "huggingface_cli": shutil.which("huggingface-cli"),
         "paths": {str(path): path_report(path) for path in paths},
@@ -408,7 +420,15 @@ def download_wan22_model() -> None:
 
 
 def wan22_model_present() -> bool:
-    return WAN22_MODEL_DIR.exists() and any(WAN22_MODEL_DIR.iterdir())
+    return WAN22_MODEL_DIR.exists() and not missing_wan22_files()
+
+
+def missing_wan22_files() -> list[str]:
+    return [
+        relative_path
+        for relative_path in WAN22_REQUIRED_FILES
+        if not (WAN22_MODEL_DIR / relative_path).exists()
+    ]
 
 
 def path_report(path: Path) -> dict[str, Any]:
