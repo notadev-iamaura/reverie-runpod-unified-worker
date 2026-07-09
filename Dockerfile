@@ -28,6 +28,7 @@ RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
     && grep -v '^flash_attn' requirements.txt > /tmp/wan22-requirements-no-flash-attn.txt \
     && /opt/venv/bin/python -m pip install --no-cache-dir \
       -r /tmp/wan22-requirements-no-flash-attn.txt \
+      decord \
       ninja packaging
 
 COPY handler.py /handler.py
