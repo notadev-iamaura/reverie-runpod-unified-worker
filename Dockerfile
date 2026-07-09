@@ -23,7 +23,11 @@ ARG WAN22_REF=main
 RUN git clone https://github.com/Wan-Video/Wan2.2.git /opt/Wan2.2 \
     && cd /opt/Wan2.2 \
     && git checkout "${WAN22_REF}" \
-    && /opt/venv/bin/python -m pip install --no-cache-dir -r requirements.txt
+    && grep -v '^flash_attn' requirements.txt > /tmp/wan22-requirements-no-flash-attn.txt \
+    && /opt/venv/bin/python -m pip install --no-cache-dir \
+      -r /tmp/wan22-requirements-no-flash-attn.txt \
+      ninja packaging \
+    && /opt/venv/bin/python -m pip install --no-cache-dir --no-build-isolation flash_attn
 
 COPY handler.py /handler.py
 COPY scripts/download_wan22_ti2v_5b.sh /usr/local/bin/download_wan22_ti2v_5b.sh
